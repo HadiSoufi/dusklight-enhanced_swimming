@@ -1,0 +1,7 @@
+{
+  "id": "com.hadi.enhanced_swimming",
+  "name": "Enhanced Swimming",
+  "version": "1.0.0",
+  "author": "Hadi",
+  "description": "Make the Zora Armor turn Link into a real Zora. Restores the basic swim dash while not diving, increases dive speed, maps dives to (RT) and adds the ability to dash while diving."
+}
