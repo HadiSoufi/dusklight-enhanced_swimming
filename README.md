@@ -1,4 +1,4 @@
-# Enhanced Zora Swimming
+# Enhanced Swimming
 ## Part of a series of mods for [Dusklight](https://twilitrealm.dev/) attempting to modernize it
 
 ### The Problem
