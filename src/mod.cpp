@@ -10,9 +10,7 @@
 #include "d/actor/d_a_alink.h"
 #include "d/d_com_inf_game.h"
 #include "d/d_meter2_draw.h"
-#include "d/d_meter_HIO.h"
 #include "d/d_meter_button.h"
-#include "d/d_pane_class.h"
 #include "d/d_particle.h"
 #include "d/d_particle_name.h"
 #include "m_Do/m_Do_controller_pad.h"
@@ -24,15 +22,14 @@ IMPORT_SERVICE(LogService,  svc_log);
 
 static constexpr f32 kZoraForwardSpeed = 13.0f;
 
-static constexpr f32 kDiveButtonScale = 0.8f;
 static constexpr f32 kSprintFactor    = 1.6f;
 static constexpr f32 kSpinDashBoost   = 1.6f;
 static constexpr f32 kSpinBurstPeak   = 2.0f;
 
 /* ------------------------------------------------------------------
  *  Swim speed
- *  setSwimMoveAnime mutates mMaxSpeed every frame — pre-hook unwinds
- *  the previous frame's scale so the post-hook can re-apply cleanly.
+ *  setSwimMoveAnime mutates mMaxSpeed each frame, so scaling in-place
+ *  compounds. Pre-hook removes the old factor; post-hook applies the new.
  * ------------------------------------------------------------------ */
 DEFINE_HOOK(&daAlink_c::setSwimMoveAnime, SwimMoveAnime);
 
@@ -80,6 +77,20 @@ static bool is_swim_proc(u16 procID) {
     return procID >= daAlink_c::PROC_SWIM_UP && procID <= daAlink_c::PROC_SWIM_DIVE;
 }
 
+static bool is_zora_swim(const daAlink_c* link) {
+    return link->checkZoraWearAbility() &&
+           link->mProcID == daAlink_c::PROC_SWIM_MOVE &&
+           !link->getZoraSwim();
+}
+
+static bool is_underwater(const daAlink_c* link) {
+    return link->current.pos.y < link->mWaterY;
+}
+
+static bool is_underwater_dive(const daAlink_c* link) {
+    return link->mProcID == daAlink_c::PROC_SWIM_DIVE;
+}
+
 static void on_set_stick_data_post(ModContext*, void* args, void*, void*) {
     daAlink_c* link = mods::arg<daAlink_c*>(args, 0);
     if (!link->checkZoraWearAbility() || !is_swim_proc(link->mProcID)) return;
@@ -88,6 +99,9 @@ static void on_set_stick_data_post(ModContext*, void* args, void*, void*) {
     link->mItemButton  &= static_cast<u8>(~daAlink_c::BTN_A);
     if (mDoCPd_c::getTrigR(PAD_1)) link->mItemTrigger |= daAlink_c::BTN_A;
     if (mDoCPd_c::getHoldR(PAD_1)) link->mItemButton  |= daAlink_c::BTN_A;
+
+    if (is_zora_swim(link) && is_underwater(link))
+        dComIfGp_setRStatusForce(BUTTON_STATUS_DIVE, 2);
 }
 
 /* ------------------------------------------------------------------
@@ -141,7 +155,7 @@ static HookAction on_set_normal_speed_pre(ModContext*, void* args, void*, void*)
 }
 
 /* ------------------------------------------------------------------
- *  HUD: Dive → RT icon, Swim → Dash
+ *  HUD: action text, dive prompts
  * ------------------------------------------------------------------ */
 static void strip_a_suffix(char* buf) {
     if (!buf || !buf[0]) return;
@@ -163,14 +177,13 @@ static void strip_a_suffix(char* buf) {
 DEFINE_HOOK(&dMeter2Draw_c::getActionString, GetActionString);
 
 static void on_get_action_string_post(ModContext*, void* args, void* ret, void*) {
-    u8 action = mods::arg<u8>(args, 1);
     char* buf = *static_cast<char**>(ret);
     if (!buf || !buf[0]) return;
 
     strip_a_suffix(buf);
 
-    if (action == BUTTON_STATUS_SWIM && buf[0] == 'S' && buf[1] == 'w' &&
-        buf[2] == 'i' && buf[3] == 'm') {
+    if (buf[0] == 'S' && buf[1] == 'w' && buf[2] == 'i' && buf[3] == 'm' &&
+        !(buf[4] >= 'a' && buf[4] <= 'z')) {
         buf[0] = 'D'; buf[1] = 'a'; buf[2] = 's'; buf[3] = 'h';
     }
 }
@@ -180,6 +193,9 @@ DEFINE_HOOK(&dMeter2Draw_c::drawButtonA, DrawButtonA);
 static void on_draw_button_a_post(ModContext*, void* args, void*, void*) {
     u8 action = mods::arg<u8>(args, 1);
     if (action != BUTTON_STATUS_DIVE) return;
+
+    daAlink_c* link = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+    if (link && is_underwater_dive(link)) return;
 
     dMeter2Draw_c* meter = mods::arg<dMeter2Draw_c*>(args, 0);
     J2DScreen* screen = meter->getMainScreenPtr();
@@ -220,35 +236,35 @@ static void on_draw_button_a_post(ModContext*, void* args, void*, void*) {
     }
 }
 
-DEFINE_HOOK(&dMeterButton_c::_execute, MeterButtonExecute);
-
-static HookAction on_meter_button_execute_pre(ModContext*, void* args, void*, void*) {
-    if (dComIfGp_getDoStatus() != BUTTON_STATUS_DIVE) return HOOK_CONTINUE;
-
-    bool& drawA = mods::arg_ref<bool>(args, 2);
-    bool& drawR = mods::arg_ref<bool>(args, 4);
-    if (drawA) { drawA = false; drawR = true; }
-    return HOOK_CONTINUE;
-}
-
-static void on_meter_button_execute_post(ModContext*, void* args, void*, void*) {
-    if (dComIfGp_getDoStatus() != BUTTON_STATUS_DIVE) return;
-
-    dMeterButton_c* btn = mods::arg<dMeterButton_c*>(args, 0);
-    if (!btn || !btn->mpButtonR) return;
-
-    f32 base = g_drawHIO.mEmpButton.mRButtonScale;
-    btn->mpButtonR->getPanePtr()->scale(base * kDiveButtonScale, base * kDiveButtonScale);
-}
-
 DEFINE_HOOK(&dMeterButton_c::setString, MeterButtonSetString);
 
 static HookAction on_meter_button_set_string_pre(ModContext*, void* args, void*, void*) {
     if (dComIfGp_getDoStatus() != BUTTON_STATUS_DIVE) return HOOK_CONTINUE;
 
+    daAlink_c* link = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+    if (link && is_underwater_dive(link)) return HOOK_CONTINUE;
+
     u8& button = mods::arg_ref<u8>(args, 2);
     if (button == dMeterButton_c::BUTTON_A_e)
         button = dMeterButton_c::BUTTON_R_e;
+    return HOOK_CONTINUE;
+}
+
+DEFINE_HOOK(&dMeterButton_c::_execute, MeterButtonExecute);
+
+static HookAction on_meter_button_execute_pre(ModContext*, void* args, void*, void*) {
+    u8 status = dComIfGp_getDoStatus();
+    daAlink_c* link = static_cast<daAlink_c*>(dComIfGp_getPlayer(0));
+
+    if (status == BUTTON_STATUS_DIVE && link &&
+        !is_underwater_dive(link)) {
+        bool& drawA = mods::arg_ref<bool>(args, 2);
+        bool& drawR = mods::arg_ref<bool>(args, 4);
+        if (drawA) { drawA = false; drawR = true; }
+    } else if (status == BUTTON_STATUS_SWIM && link &&
+               is_zora_swim(link) && is_underwater(link)) {
+        mods::arg_ref<bool>(args, 4) = true;
+    }
     return HOOK_CONTINUE;
 }
 
@@ -289,8 +305,7 @@ MOD_EXPORT ModResult mod_initialize(ModError*) {
         return MOD_ERROR;
     }
 
-    if (mods::hook_add_pre<MeterButtonExecute>(svc_hook, on_meter_button_execute_pre) != MOD_OK ||
-        mods::hook_add_post<MeterButtonExecute>(svc_hook, on_meter_button_execute_post) != MOD_OK) {
+    if (mods::hook_add_pre<MeterButtonExecute>(svc_hook, on_meter_button_execute_pre) != MOD_OK) {
         svc_log->error(mod_ctx, "Enhanced Swimming: failed to hook dMeterButton::_execute");
         return MOD_ERROR;
     }
