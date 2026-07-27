@@ -19,6 +19,7 @@ With that in mind, this mod does the following:
 2. Binds **Zora Dive** to (RT) instead of (A) and updates the HUD accordingly.
 3. Adds a dash to **Zora Dive**, bound to (A).
 4. Copies the dash from **Link Swim** to **Zora Swim**
+5. Add a prompt, Dash (A), to **Link Swim**. It's one of the only un-prompted actions in the game, it's a strange oversight
 
 The result is that swimming with the Zora Armor is faster, more engaging, and plays better to modern sensibilities. Most critically, moving **Zora Dive** to (RT) opens up the face buttons for use, allowing for future mods to add other features, like replicating the combat from Zora Link in Majora's Mask.
 
